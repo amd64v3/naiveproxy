@@ -46,6 +46,8 @@ QuicProxyClientSocket::QuicProxyClientSocket(
       proxy_chain_index_(proxy_chain_index),
       proxy_delegate_(proxy_delegate),
       user_agent_(user_agent),
+      use_fastopen_(false),
+      read_headers_pending_(false),
       net_log_(net_log) {
   DCHECK(stream_->IsOpen());
 
@@ -315,6 +317,16 @@ int QuicProxyClientSocket::DoLoop(int last_io_result) {
         rv = DoReadReplyComplete(rv);
         net_log_.EndEventWithNetErrorCode(
             NetLogEventType::HTTP_TRANSACTION_TUNNEL_READ_HEADERS, rv);
+        if (use_fastopen_ && read_headers_pending_) {
+          read_headers_pending_ = false;
+          if (rv < 0) {
+            // read_callback_ will be called with this error and be reset.
+            // Further data after that will be ignored.
+            next_state_ = STATE_DISCONNECTED;
+          }
+          // Prevents calling connect_callback_.
+          rv = ERR_IO_PENDING;
+        }
         break;
       case STATE_PROCESS_RESPONSE_HEADERS:
         DCHECK_EQ(OK, rv);
@@ -364,19 +376,18 @@ int QuicProxyClientSocket::DoCalculateHeaders() {
   }
 
   if (proxy_delegate_) {
-    ASSIGN_OR_RETURN(
-        proxy_delegate_headers_,
-        proxy_delegate_->OnBeforeTunnelRequest(
-            proxy_chain_, proxy_chain_index_,
-            base::BindOnce(
-                &QuicProxyClientSocket::OnBeforeTunnelRequestComplete,
-                weak_factory_.GetWeakPtr())),
-        [](const auto& e) {
-          // Success should always be reported via a base::expected containing
-          // an HttpRequestHeaders, see ProxyDelegate::OnBeforeTunnelRequest.
-          CHECK_NE(OK, e);
-          return e;
-        });
+    HttpRequestHeaders proxy_delegate_headers;
+    int result = proxy_delegate_->OnBeforeTunnelRequest(
+        proxy_chain_, proxy_chain_index_, &proxy_delegate_headers);
+    if (result < 0) {
+      return result;
+    }
+    if (proxy_delegate_headers.HasHeader("fastopen")) {
+      proxy_delegate_headers.RemoveHeader("fastopen");
+      // TODO(klzgrad): look into why Fast Open does not work.
+      use_fastopen_ = true;
+    }
+    request_.extra_headers.MergeFrom(proxy_delegate_headers);
   }
   return OK;
 }
@@ -431,6 +442,11 @@ int QuicProxyClientSocket::DoReadReply() {
       &response_header_block_,
       base::BindOnce(&QuicProxyClientSocket::OnReadResponseHeadersComplete,
                      weak_factory_.GetWeakPtr()));
+  if (use_fastopen_ && rv == ERR_IO_PENDING) {
+    read_headers_pending_ = true;
+    next_state_ = STATE_CONNECT_COMPLETE;
+    return OK;
+  }
   if (rv == ERR_IO_PENDING)
     return ERR_IO_PENDING;
   if (rv < 0)
@@ -499,6 +515,13 @@ int QuicProxyClientSocket::DoProcessResponseCode() {
 
 void QuicProxyClientSocket::OnReadResponseHeadersComplete(int result) {
   // Convert the now-populated quiche::HttpHeaderBlock to HttpResponseInfo
+  if (use_fastopen_ && read_headers_pending_) {
+    if (next_state_ == STATE_DISCONNECTED)
+      return;
+    if (next_state_ == STATE_CONNECT_COMPLETE)
+      next_state_ = STATE_READ_REPLY_COMPLETE;
+  }
+
   if (result > 0)
     result = ProcessResponseHeaders(response_header_block_);
 
