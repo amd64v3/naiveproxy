@@ -2695,7 +2695,6 @@ copy("build_date") {
       build_timestamp,
     ]
   }
-}
 
 copy("build_date") {
   sources = [ "$root_build_dir/gen/base/generated_build_date_internal.h" ]
