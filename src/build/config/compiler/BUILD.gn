@@ -218,7 +218,7 @@ if (is_android) {
   # the Chrome binary/library.
   declare_args() {
     chrome_orderfile_path = ""
-
+    llvm_android_mainline = false
     # The orderfile is trained on PGO builds (for arm64) and AFDO builds (for
     # arm32), so apply them only in these cases.
     if (((current_cpu == "arm64" || current_cpu == "x64") &&
