@@ -3297,7 +3297,6 @@ config("minimal_symbols") {
     asmflags = cflags
   }
   rustflags += [ "-Cdebuginfo=1" ]
-}
 
 # This configuration contains function names only. That is, the compiler is
 # told to not generate debug information and the linker then just puts function
