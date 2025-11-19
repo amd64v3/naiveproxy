@@ -49,13 +49,14 @@ if (!is_clang) {
 declare_args() {
   # This allows overriding the location of lld.
   lld_path = default_lld_path
+  llvm_android_mainline = false
 }
 
 declare_args() {
   # Normally, Android builds are lightly optimized, even for debug builds, to
   # keep binary size down. Setting this flag to true disables such optimization
   android_full_debug = false
-
+  llvm_android_mainline = false
   # Compile in such a way as to make it possible for the profiler to unwind full
   # stack frames. Setting this flag has a large effect on the performance of the
   # generated code than just setting profiling, but gives the profiler more
@@ -207,6 +208,7 @@ declare_args() {
 
 declare_args() {
   # Set to true to use icf, Identical Code Folding.
+  llvm_android_mainline = false
   use_icf = (is_posix || is_fuchsia) && !is_debug && !using_sanitizer &&
             !use_clang_coverage && !(is_android && use_order_profiling) &&
             use_lld && !is_wasm
@@ -253,6 +255,7 @@ if (is_android) {
 }
 
 declare_args() {
+  llvm_android_mainline = false
   # Turn off the --call-graph-profile-sort flag for lld by default. Enable
   # selectively for targets where it's beneficial.
   enable_call_graph_profile_sort =
